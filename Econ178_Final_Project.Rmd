@@ -1,0 +1,267 @@
+---
+title: "Econ178_Final_Project"
+author: "Irene_Jiang"
+date: "2021/3/12"
+output: html_document
+---
+
+```{r}
+pathfile=getwd()
+pathfile=file.path(pathfile,"\\data_tr.txt")
+wealth=read.table(pathfile, header=TRUE)[,-1]
+wealth
+```
+
+
+
+```{r}
+y=wealth$tw
+hist(y)
+summary(y)
+#x=wealth[2:18]
+```
+we can see the wealth is heavily skewed to the right with outliers who have extremely high wealth, which I would consider excluding them.
+```{r}
+IQR=82173-3246
+outlier1=82173+1.5*IQR
+outlier2=3246-1.5*IQR
+IQR
+outlier1
+outlier2
+```
+
+
+```{r}
+summary(wealth[,-1])
+```
+from this summary, by looking at the mean of variable "male" and "nohs", we can see there is unbalanced data where there is more data on female than on male and more data on data on people went to high school. So, we need to see if the data we tried to predict also share the simular unbalanced data. Besides, "ira" seems to have large outliers since 75% data is 0, however, the max value is way larger than the most of data. I could consider dropping outlieres in "ira".
+
+```{r}
+boxplot(wealth$e401,y,names=c("0","1"),xlab="e401",ylab="total wealth")
+boxplot(wealth$male,y,names=c("0","1"),xlab="male",ylab="total wealth")
+boxplot(wealth$twoearn,y,names=c("0","1"),xlab="two earners",ylab="total wealth")
+boxplot(wealth$col,y,names=c("0","1"),xlab="college",ylab="total wealth")
+boxplot(wealth$marr,y,names=c("0","1"),xlab="married",ylab="total wealth")
+```
+Those are boxplots for the dummy variables against the dependent variable "total wealth" (I left out the boxplot for "nohs","hs","smcol", because all those variables are basically falls into the category of level of education, and in the category of level of education, I want to focus on looking at the mean difference between people went to college or not). We could see the outlier significantly impacted the value of variables. So, I'm going to exclude the outliers in total wealth for prediction.
+
+```{r}
+library(lattice)
+library(ellipse)
+cor_note <- cor(wealth)
+# Function to generate correlation plot
+panel.corrgram <- function(x, y, z, subscripts, at, level = 0.9, label = FALSE, ...) {
+     require("ellipse", quietly = TRUE)
+     x <- as.numeric(x)[subscripts]
+     y <- as.numeric(y)[subscripts]
+     z <- as.numeric(z)[subscripts]
+     zcol <- level.colors(z, at = at,  ...)
+     for (i in seq(along = z)) {
+         ell=ellipse(z[i], level = level, npoints = 50, 
+                     scale = c(.2, .2), centre = c(x[i], y[i]))
+         panel.polygon(ell, col = zcol[i], border = zcol[i], ...)
+     }
+     if (label)
+         panel.text(x = x, y = y, lab = 100 * round(z, 2), cex = 0.8,
+                    col = ifelse(z < 0, "white", "black"))
+ }
+# generate correlation plot
+print(levelplot(cor_note[seq(6,1), seq(6,1)], at = do.breaks(c(-1.01, 1.01), 20),
+           xlab = NULL, ylab = NULL, colorkey = list(space = "top"), col.regions=rev(heat.colors(100)),
+           scales = list(x = list(rot = 90)),
+           panel = panel.corrgram, label = TRUE))
+```
+From the correlation plot, the more eclipse the shape is, the more correlation they are (red means positive association). So, we can see there is a strong positive association between the variable "nifa" and "total wealth", and a relatively strong positive association between "ira" and "total wealth", while other variables are less associated with each other.
+
+I first fit a simple linear regression on the variable that is most associate with predicting total wealth
+```{r}
+reg1=lm(y~nifa+ira,data=wealth)
+plot(reg1)
+```
+
+Here I excluded the max values in the variable "ira" and outliers in the total wealth.
+
+
+
+```{r}
+#excluding outliers in total wealth
+y=wealth$tw
+a=which(y>200563.5)
+b = which(y < -115144.5)
+newY=y[-a]
+newX=wealth[-a,]
+new_Y=newY[-b]
+new_X=newX[-b,]
+new_X = new_X[new_X$ira < max(new_X$ira),]
+new_Y=new_X$tw
+new_X
+
+```
+
+```{r}
+boxplot(new_X$e401,new_Y,names=c("0","1"),xlab="e401",ylab="total wealth")
+boxplot(new_X$male,new_Y,names=c("0","1"),xlab="male",ylab="total wealth")
+boxplot(new_X$twoearn,new_Y,names=c("0","1"),xlab="two earners",ylab="total wealth")
+boxplot(new_X$col,new_Y,names=c("0","1"),xlab="college",ylab="total wealth")
+boxplot(new_X$marr,new_Y,names=c("0","1"),xlab="married",ylab="total wealth")
+```
+Now the boxplots looks much better as I excluded outliers. The mean for different categories is much comparable and clear. 
+
+```{r}
+reg1=lm(new_Y~nifa+ira,data=new_X)
+plot(reg1)
+```
+Now the residuals looks much better without the outliers in "ira" and "tw". The residuals are definitely smaller than before.
+```{r}
+pathfile=getwd()
+pathfile=file.path(pathfile,"\\data_for_prediction.txt")
+predictdata=read.table(pathfile, header=TRUE)[,-1]
+head(predictdata)
+```
+```{r}
+write.csv(predictdata,file='..//Econ178//predictdata.csv')
+```
+
+```{r}
+summary(predictdata)
+```
+The test dataset is also unbalanced with more women and more people went to high school, so I can include the variable "nohs" and "male" in the regressor. 
+
+
+
+```{r}
+library(MASS)
+library(glmnet)
+n<-length(new_Y)
+k<-5
+ii<-sample(rep(1:k,length=n))
+pr.stepwise_backward<-pr.stepwise_forward<-pr.lasso<-pr.ridge<-rep(NA,length(new_Y))
+
+for(j in 1:k){
+  hold<-(ii==j)
+  train<-(ii!=j)
+  ## Stepwise
+  full<-lm(tw~., data=new_X[train,])
+  null<-lm(tw~1, data=new_X[train,])
+  a<-stepAIC(null, scope=list(lower=null, upper=full), trace=FALSE, direction='forward')
+  # backward stepwise - AIC
+  b<-stepAIC(full, scope=list(lower=null, upper=full), trace=FALSE, direction='backward')
+  pr.stepwise_backward[hold]<-predict(b, newdata=new_X[hold,])
+  pr.stepwise_forward[hold]<-predict(a, newdata=new_X[hold,])
+  ## Do with lasso (we use X and y defined above)
+  xx.tr<-new_X[train,-1]
+  y.tr<-new_Y[train]
+  xx.te<-new_X[hold,-1]
+  ridge.cv<-cv.glmnet(x=as.matrix(xx.tr), y=y.tr, nfolds=k, alpha=0)
+  lasso.cv<-cv.glmnet(x=as.matrix(xx.tr), y=y.tr, nfolds=k, alpha=1)
+  pr.lasso[hold]<-predict(lasso.cv, newx=as.matrix(xx.te))
+  pr.ridge[hold]<-predict(ridge.cv, newx=as.matrix(xx.te))}
+mspe_step_backward<-mean((pr.stepwise_backward-new_Y)^2)
+mspe_step_forward<-mean((pr.stepwise_forward-new_Y)^2)
+mspe.Lasso<-mean((pr.lasso-new_Y)^2)
+mspe.ridge<-mean((pr.ridge-new_Y)^2)
+c(mspe_step_backward, mspe_step_forward, mspe.Lasso, mspe.ridge)
+```
+
+
+```{r}
+#Since forward stepAIC give the smallest MSE, we could investigate further on this model
+null<-lm(tw~1, data=new_X)
+full<-lm(tw~., data=new_X)
+my_model=stepAIC(null, scope=list(lower=null, upper=full), trace=FALSE, direction='forward')
+summary(my_model)
+plot(my_model)
+```
+
+## Transforming data
+Looking to see if transformation of the data wiht interaction terms and quadratic terms would be a better fit
+```{r}
+library(dplyr) 
+transformed_data=new_X %>%
+  mutate(inc_educ = inc*educ) %>%
+  mutate(age_inc = age*inc) %>%
+  mutate(inc_male = inc*male) %>%
+  mutate(male_marr = male*marr) %>%
+  mutate(ira_quatratic = ira^2)
+#transformed_data=cbind(new_X,new_X$inc*new_X$educ,new_X$age*new_X$inc,new_X$inc*new_X$male,new_X$male*new_X$marr,new_X$ira^2)
+head(transformed_data)
+```
+```{r}
+n<-length(new_Y)
+k<-5
+ii<-sample(rep(1:k,length=n))
+pr.stepwise_backward<-pr.stepwise_forward<-pr.lasso<-pr.ridge<-rep(NA,length(new_Y))
+
+for(j in 1:k){
+  hold<-(ii==j)
+  train<-(ii!=j)
+  ## Stepwise
+  full<-lm(tw~., data=transformed_data[train,])
+  null<-lm(tw~1, data=transformed_data[train,])
+  a<-stepAIC(null, scope=list(lower=null, upper=full), trace=FALSE, direction='forward')
+  # backward stepwise - AIC
+  b<-stepAIC(full, scope=list(lower=null, upper=full), trace=FALSE, direction='backward')
+  pr.stepwise_backward[hold]<-predict(b, newdata=transformed_data[hold,-1])
+  pr.stepwise_forward[hold]<-predict(a, newdata=transformed_data[hold,-1])
+  ## Do with lasso (we use X and y defined above)
+  xx.tr<-transformed_data[train,-1]
+  y.tr<-new_Y[train]
+  xx.te<-transformed_data[hold,-1]
+  ridge.cv<-cv.glmnet(x=as.matrix(xx.tr), y=y.tr, nfolds=k, alpha=0)
+  lasso.cv<-cv.glmnet(x=as.matrix(xx.tr), y=y.tr, nfolds=k, alpha=1)
+  pr.lasso[hold]<-predict(lasso.cv, newx=as.matrix(xx.te))
+  pr.ridge[hold]<-predict(ridge.cv, newx=as.matrix(xx.te))}
+mspe_step_backward<-mean((pr.stepwise_backward-new_Y)^2)
+mspe_step_forward<-mean((pr.stepwise_forward-new_Y)^2)
+mspe.Lasso<-mean((pr.lasso-new_Y)^2)
+mspe.ridge<-mean((pr.ridge-new_Y)^2)
+c(mspe_step_backward, mspe_step_forward, mspe.Lasso, mspe.ridge)
+```
+After including the interaction terms, the MSPE is better for all four of those, and the step_backward is the best model. ALthouhg step_bakcward and step_forward yield a very similar result and MSPE, I'm going to apply backward stepAIC for my final prediction
+```{r}
+#predicting using the transformed data
+full<-lm(tw~., data=transformed_data)
+null<-lm(tw~1, data=transformed_data)
+my_model=stepAIC(full, scope=list(lower=null, upper=full), trace=FALSE, direction='backward')
+#my_model=cv.glmnet(y=new_Y, x=as.matrix(transformed_data[,c(2:21)]))
+plot(my_model)
+```
+```{r}
+#apply the same trasformation to the test data that used on the training data
+transformed_data_test=predictdata %>%
+  mutate(inc_educ = inc*educ) %>%
+  mutate(age_inc = age*inc) %>%
+  mutate(inc_male = inc*male) %>%
+  mutate(male_marr = male*marr) %>%
+  mutate(ira_quatratic = ira^2)
+#transformed_data_test<-cbind(predictdata, predictdata$inc*predictdata$educ,predictdata$age*predictdata$inc,predictdata$inc*predictdata$male,predictdata$male*predictdata$marr,predictdata$ira^2)
+head(transformed_data_test)
+```
+```{r}
+#make prediction
+my_predictions=predict(my_model,newdata=transformed_data_test)
+#my_X<-transformed_data[,c(2:23)]
+#names(my_X)<-paste0(c("ira","e401","nifa","inc","hmort","hval","hequity","educ","male","twoearn","nohs","hs","smcol","col","age","fsize","marr", "inc_edu","age_inc","inc_male","male_marr","ira^2"),c(1:dim(my_X)[2]))
+
+#my_model=stepAIC(full, scope=list(lower=null, upper=full), trace=FALSE, direction='backward')
+#my_X_test<-transformed_data_test[,c(1:22)]
+#names(my_X_test)<-paste0(c("ira","e401","nifa","inc","hmort","hval","hequity","educ","male","twoearn","nohs","hs","smcol","col","age","fsize","marr", "inc_edu","age_inc","inc_male","male_marr","ira^2"),c(1:dim(my_X_test)[2]))
+#my_X_test
+## Then the predictions must be stored as
+#my_predictions<-predict(my_model, newdata=my_X_test)
+
+#<-predict(my_model,newdata=tranformed_data_test)
+head(my_predictions)
+```
+```{r}
+#Control that the length is correct
+length(my_predictions)
+dim(predictdata)
+```
+
+```{r}
+## Save your predictions
+write.table(my_predictions, file='..//Econ178//my_predictions.txt')
+```
+
+
